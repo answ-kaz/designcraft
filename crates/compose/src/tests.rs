@@ -3059,6 +3059,58 @@ fn cjk_hanging_punctuation_uses_frame_edge_without_changing_glyph_size() {
 }
 
 #[test]
+fn line_end_half_em_mojikumi_sets_a_line_end_full_stop_at_half_width() {
+    let text = "AB。C";
+    let (mut d, sid, fid) = doc_with(
+        text,
+        Rect::new(0.0, 0.0, 300.0, 100.0),
+        ParaAttrs { composer: Some(designcraft_doc::Composer::SingleLine), mojikumi: Some("LineEndAllOneHalfEmEnum".into()), ..Default::default() },
+    );
+    let wide = compose_story(&d, sid, &ComposeOptions::default());
+    let g = &wide.frames[0].lines[0].glyphs;
+    let (text_w, stop) = (g[0].adv + g[1].adv, g[2].adv);
+    assert!(stop > 0.0);
+    // The measure holds "AB" and half of the full stop, not all of it.
+    d.item_mut(fid).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, text_w + stop * 0.5 + 0.5, 100.0));
+    let with_rule = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(with_rule.frames[0].lines[0].glyphs.len(), 3, "the full stop stays on the first line");
+    d.story_mut(sid).unwrap().paras[0].para.mojikumi = None;
+    let without = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(without.frames[0].lines[0].glyphs.len(), 1, "without the rule the full stop and its kinsoku partner move down");
+}
+
+#[test]
+fn a_full_stop_hanging_at_half_width_ends_a_paragraph_or_forced_break_line() {
+    // The line "AB。" only fits the measure by setting its last glyph at half width, both at the end
+    // of the paragraph and before a forced line break (the fill glue before the break carries the hang).
+    for text in ["AB。", "AB。\u{2028}C"] {
+        let (mut d, sid, fid) =
+            doc_with(text, Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs { mojikumi: Some("LineEndAllOneHalfEmEnum".into()), ..Default::default() });
+        let wide = compose_story(&d, sid, &ComposeOptions::default());
+        let g = &wide.frames[0].lines[0].glyphs;
+        let (text_w, stop) = (g[0].adv + g[1].adv, g[2].adv);
+        d.item_mut(fid).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, text_w + stop * 0.5 + 0.5, 100.0));
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        assert_eq!(cs.frames[0].lines[0].glyphs.iter().filter(|g| g.visible).count(), 3, "{text:?}: the full stop stays on the first line");
+        assert!(!cs.is_overset());
+    }
+}
+
+#[test]
+fn tracking_after_the_last_glyph_of_a_line_does_not_have_to_fit() {
+    // InDesign sets a line of tracked text in a measure that holds every glyph but the tracking after the last.
+    let (mut d, sid, fid) = doc_with("nnnn", Rect::new(0.0, 0.0, 300.0, 100.0), ParaAttrs { hyphenate: Some(false), ..Default::default() });
+    d.story_mut(sid).unwrap().format_chars(0..4, |f| f.over.tracking = Some(500.0));
+    let wide = compose_story(&d, sid, &ComposeOptions::default());
+    let end_x = wide.frames[0].lines[0].end_x;
+    let tracking = 500.0 / 1000.0 * 12.0;
+    d.item_mut(fid).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, end_x - tracking + 0.5, 100.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(all_lines(&cs).len(), 1, "the line fits without its trailing tracking");
+    assert!(!cs.is_overset());
+}
+
+#[test]
 fn cjk_fullwidth_space_obeys_the_paragraph_spacing_switch() {
     let text = "A　B";
     let (mut d, sid, _) = doc_with(
@@ -3815,7 +3867,15 @@ fn a_word_longer_than_the_line_breaks_at_the_column_edge() {
                 for l in &lines {
                     let ink: Vec<_> = l.glyphs.iter().filter(|g| g.visible && g.adv > 0.0).collect();
                     let right = ink.iter().map(|g| g.x + g.adv.min(natural[&g.byte])).fold(l.x0, f64::max);
-                    assert!(l.end_x <= l.x1 + 0.02 && right <= l.x1 + 0.02, "{what}: line {:?} ends at {} past {}", l.range, l.end_x, l.x1);
+                    // As in InDesign, the tracking after the last glyph of a line hangs: it doesn't have to fit.
+                    let trailing = tracking / 1000.0 * 12.0;
+                    assert!(
+                        l.end_x - trailing <= l.x1 + 0.02 && right - trailing <= l.x1 + 0.02,
+                        "{what}: line {:?} ends at {} past {}",
+                        l.range,
+                        l.end_x,
+                        l.x1
+                    );
                     for w in ink.windows(2) {
                         assert!(w[1].x >= w[0].x + natural[&w[0].byte] - 1e-6, "{what}: glyphs overlap at {}", w[1].byte);
                     }

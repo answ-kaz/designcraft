@@ -1606,6 +1606,16 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptio
     out
 }
 
+/// Closing brackets, full stops and commas that a "line end half-width" mojikumi sets at half an em
+/// when they end a line (行末約物半角).
+const LINE_END_HALF_EM: &str = "、。，．」』）】〕〉》｝］〙〗";
+
+/// Does the paragraph's mojikumi set line-end punctuation at half width (IDML `LineEndAllOneHalfEm`)?
+/// Only this one rule of the spacing table is applied; the rest of the table is preserved, not applied.
+fn line_end_half_em(pp: &ParaProps) -> bool {
+    pp.mojikumi.contains("LineEndAllOneHalfEm")
+}
+
 /// Breaker parameters from the paragraph's settings.
 fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
     Spacing {
@@ -1637,6 +1647,9 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
         let Some(g) = left.last_mut() else { continue };
         if pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None && pp.kinsoku.as_ref().is_some_and(|k| k.hanging.contains(g.ch)) {
             g.cjk_hang = g.adv;
+        }
+        if line_end_half_em(pp) && LINE_END_HALF_EM.contains(g.ch) {
+            g.cjk_hang = g.cjk_hang.max(g.adv * 0.5);
         }
         g.ideographic_space_elastic = pp.treat_ideographic_space_as_space;
         if g.ch == '\u{3000}' && pp.treat_ideographic_space_as_space {
@@ -2545,7 +2558,9 @@ fn layout_line(
     let has_tab = line.iter().any(|g| g.ch == '\t' || g.ch == story::RIGHT_INDENT_TAB);
     // Optical margin alignment: the measure grows by the hang of the edge glyphs.
     let (mut x0, mut measure) = (x0, measure);
-    if (sp.optical || pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None) && !has_tab {
+    if (sp.optical || pp.kinsoku_hang != designcraft_doc::cjk::KinsokuHang::None || line_end_half_em(pp) || line.iter().any(|g| g.cjk_hang > 0.0))
+        && !has_tab
+    {
         let first = line.iter().find(|g| g.adv > 0.0 && !g.is_space());
         let lastg = line.iter().rev().find(|g| g.adv > 0.0 && !g.is_space());
         let hl = if sp.optical { first.map_or(0.0, |g| breaker::hang(g.ch).0 * g.adv) } else { 0.0 };

@@ -321,7 +321,11 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], emergency_after: &[bool], sp: &S
             continue;
         }
         if is_forced(g.ch) {
-            it.push(Item::glue(0.0, INF, 0.0));
+            // The fill glue is a break opportunity of its own: it carries the hang of the break after
+            // it, or a line that only fits by hanging its last glyph would be given up here.
+            let mut fill = Item::glue(0.0, INF, 0.0);
+            fill.hang = prev_hang;
+            it.push(fill);
             ig.push(i);
             let mut p = Item::penalty(0.0, -INF, false);
             p.hang = prev_hang;
@@ -397,11 +401,14 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], emergency_after: &[bool], sp: &S
             }
         }
     }
-    // Paragraph end: fill glue + forced break.
-    it.push(Item::glue(0.0, INF, 0.0));
+    // Paragraph end: fill glue + forced break (the glue carries the hang, as at a forced break above).
+    let end_hang = if n > 0 { right_hang(&glyphs[n - 1], sp) } else { 0.0 };
+    let mut fill = Item::glue(0.0, INF, 0.0);
+    fill.hang = end_hang;
+    it.push(fill);
     ig.push(n);
     let mut p = Item::penalty(0.0, -INF, false);
-    p.hang = if n > 0 { right_hang(&glyphs[n - 1], sp) } else { 0.0 };
+    p.hang = end_hang;
     it.push(p);
     ig.push(n);
     (it, ig)

@@ -999,7 +999,9 @@ fn shape_segment(
             tcy_offset: [p.tate_chu_yoko_x_offset, p.tate_chu_yoko_y_offset],
             space,
             break_after: None,
-            cjk_hang: 0.0,
+            // The tracking after a glyph doesn't count when the glyph ends a line (it hangs), as in
+            // InDesign, where a line that fits but for its last glyph's tracking is not overset.
+            cjk_hang: if last_in_cluster { tracking.max(0.0) } else { 0.0 },
             ideographic_space_elastic: false,
             character_alignment: p.character_alignment,
             leading_model: p.leading_model,
