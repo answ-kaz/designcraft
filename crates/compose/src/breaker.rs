@@ -188,7 +188,7 @@ const INF: f64 = 10000.0;
 /// A line whose natural width exceeds its measure by no more than this (points) still fits: frame
 /// widths and glyph advances are rounded, so a line that exactly fills the measure can come out a
 /// hair too wide.
-const FIT_EPS: f64 = 0.01;
+const FIT_EPS: f64 = 0.05;
 
 /// Penalty for an emergency break inside a word wider than the measure: high, so a paragraph
 /// takes no more of them than it must, but below [`INF`] so they are legal.
@@ -556,13 +556,14 @@ fn kp_pass(
             let (mut r, feasible) = tiered_ratio(d, y, z);
             if sp.justify
                 && d > 0.0
-                && y.iter().all(|v| *v < 1e-9)
                 && glyphs.get(ig[n.pos].min(glyphs.len())..ig[b].min(glyphs.len())).is_some_and(|line| line.iter().any(|g| is_cjk(g.ch)))
             {
-                // Nothing to stretch (CJK text with no letter spacing allowed): the line is spread
-                // between its characters, as InDesign does. Rate it by the space it leaves, so the
-                // composer prefers fuller lines rather than treating every such line as hopeless.
-                r = d / target;
+                // A line with CJK characters is filled by spreading the characters, as InDesign
+                // does, whatever its spaces and letter spacing can take up. Rate it by the space
+                // it leaves, so the composer prefers fuller lines: without this a line with a
+                // single word space (its stretch tiny) is hopeless unless it fits to the point,
+                // and the composer breaks at the space instead of filling the line.
+                r = r.min(d / target);
             }
             if it.emergency && sp.justify && r > 0.0 {
                 // A piece of an overlong word usually has no elastic material: rate it by the

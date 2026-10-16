@@ -1610,6 +1610,9 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptio
 /// when they end a line (行末約物半角).
 const LINE_END_HALF_EM: &str = "、。，．」』）】〕〉》｝］〙〗";
 
+/// Opening brackets: a closing mark before one is set at half width.
+const OPENING_PUNCTUATION: &str = "（「『【〔〈《｛［〘〖";
+
 /// Does the paragraph's mojikumi set line-end punctuation at half width (IDML `LineEndAllOneHalfEm`)?
 /// Only this one rule of the spacing table is applied; the rest of the table is preserved, not applied.
 fn line_end_half_em(pp: &ParaProps) -> bool {
@@ -1649,7 +1652,15 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
             g.cjk_hang = g.adv;
         }
         if line_end_half_em(pp) && LINE_END_HALF_EM.contains(g.ch) {
-            g.cjk_hang = g.cjk_hang.max(g.adv * 0.5);
+            // Half of the glyph itself, on top of the tracking after it (which hangs already).
+            let tracking = g.cjk_hang.min(g.adv);
+            g.cjk_hang = g.cjk_hang.max(tracking + (g.adv - tracking) * 0.5);
+            // A closing punctuation mark followed by another one or by an opening bracket is set at
+            // half width ("、。", "」「"), as the mojikumi tables of Japanese typesetting have it.
+            if g.adv > g.size * 0.9 && right.first().is_some_and(|n| LINE_END_HALF_EM.contains(n.ch) || OPENING_PUNCTUATION.contains(n.ch)) {
+                g.adv *= 0.5;
+                g.cjk_hang = 0.0;
+            }
         }
         g.ideographic_space_elastic = pp.treat_ideographic_space_as_space;
         if g.ch == '\u{3000}' && pp.treat_ideographic_space_as_space {
