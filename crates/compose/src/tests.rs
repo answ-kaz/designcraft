@@ -3111,6 +3111,27 @@ fn tracking_after_the_last_glyph_of_a_line_does_not_have_to_fit() {
 }
 
 #[test]
+fn justified_cjk_lines_with_nothing_to_stretch_are_balanced_not_left_hopeless() {
+    // Two lines of Japanese justified without letter spacing, the first ended by a forced line
+    // break: the composer used to rate every such line as hopeless and broke it as "「壁」" / the
+    // rest; InDesign spreads the characters, so it breaks the line in two similar halves.
+    let text = "「壁」から続く断熱の系譜を、\u{2028}家";
+    let justified = ParaAttrs { align: Some(Align::LeftJustified), hyphenate: Some(false), ..Default::default() };
+    // The natural width of the first line (ragged, so nothing is spread).
+    let ragged = ParaAttrs { align: Some(Align::Left), hyphenate: Some(false), ..Default::default() };
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 600.0, 100.0), ragged);
+    let natural: f64 = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].glyphs.iter().map(|g| g.adv).sum();
+    assert!(natural > 10.0);
+    // A measure of about 11 of the 14 characters.
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, natural * 0.8, 100.0), justified);
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    let lines = all_lines(&cs);
+    assert!(lines.len() >= 3, "{} lines", lines.len());
+    let first = lines[0].glyphs.iter().filter(|g| g.visible).count();
+    assert!((6..=8).contains(&first), "the first line holds {first} characters, not 3 or 10");
+}
+
+#[test]
 fn cjk_fullwidth_space_obeys_the_paragraph_spacing_switch() {
     let text = "A　B";
     let (mut d, sid, _) = doc_with(

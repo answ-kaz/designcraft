@@ -323,7 +323,10 @@ fn items(glyphs: &[Glyph], hyph_after: &[bool], emergency_after: &[bool], sp: &S
         if is_forced(g.ch) {
             // The fill glue is a break opportunity of its own: it carries the hang of the break after
             // it, or a line that only fits by hanging its last glyph would be given up here.
-            let mut fill = Item::glue(0.0, INF, 0.0);
+            // A justified line ended by a forced line break is justified too (as in InDesign): the
+            // fill glue that would let it stay short only ends a paragraph or a column.
+            let stretch = if sp.justify && g.ch == designcraft_doc::story::FORCED_LINE_BREAK { 0.0 } else { INF };
+            let mut fill = Item::glue(0.0, stretch, 0.0);
             fill.hang = prev_hang;
             it.push(fill);
             ig.push(i);
@@ -551,6 +554,16 @@ fn kp_pass(
             let d = target - l;
             let d = if d < 0.0 && d > -FIT_EPS { 0.0 } else { d };
             let (mut r, feasible) = tiered_ratio(d, y, z);
+            if sp.justify
+                && d > 0.0
+                && y.iter().all(|v| *v < 1e-9)
+                && glyphs.get(ig[n.pos].min(glyphs.len())..ig[b].min(glyphs.len())).is_some_and(|line| line.iter().any(|g| is_cjk(g.ch)))
+            {
+                // Nothing to stretch (CJK text with no letter spacing allowed): the line is spread
+                // between its characters, as InDesign does. Rate it by the space it leaves, so the
+                // composer prefers fuller lines rather than treating every such line as hopeless.
+                r = d / target;
+            }
             if it.emergency && sp.justify && r > 0.0 {
                 // A piece of an overlong word usually has no elastic material: rate it by the
                 // space it leaves, so the fullest piece wins (the break at the last glyph that fits).
