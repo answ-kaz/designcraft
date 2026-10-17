@@ -3111,7 +3111,7 @@ impl<'r> Importer<'r> {
                 read_from = Some(key);
             }
         }
-        if let Some(bmp) = crate::eps_preview_to_bmp(&data) {
+        if let Some(bmp) = crate::eps_preview_to_bmp(&data).or_else(|| crate::emf_raster_to_bmp(&data)) {
             data = bmp;
         }
         // A linked file that can't be read shows the document's preview of it, if it has one. The
