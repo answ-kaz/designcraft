@@ -50,6 +50,9 @@ pub struct Spacing {
     pub optical: bool,
     /// Korean text breaks between syllables instead of at spaces.
     pub korean_char_breaks: bool,
+    /// Japanese punctuation may be squeezed by up to half an em (the spacing around closing and
+    /// opening marks) before word and letter spacing are touched; see [`punct_squeeze`].
+    pub punct_squeeze: bool,
 }
 
 impl Default for Spacing {
@@ -71,6 +74,7 @@ impl Default for Spacing {
             hyph_zone: 0.0,
             optical: false,
             korean_char_breaks: false,
+            punct_squeeze: false,
         }
     }
 }
@@ -100,6 +104,21 @@ impl Spacing {
         }
         (g.space * (self.word_max - self.word_desired).max(0.0), g.space * (self.word_desired - self.word_min).max(0.0))
     }
+}
+
+/// Closing marks (full stops, commas, closing brackets): the blank half of their box is after them.
+pub(crate) const CLOSING_PUNCTUATION: &str = "、。，．」』）】〕〉》｝］〙〗";
+/// Opening brackets: the blank half of their box is before them.
+pub(crate) const OPENING_PUNCTUATION: &str = "（「『【〔〈《｛［〘〖";
+
+/// How far a Japanese punctuation mark can be squeezed on a line: the blank half of its em box
+/// (what is left of it when a neighbouring mark has squeezed it already), as InDesign's Japanese
+/// composer closes up the spacing around punctuation to fit a line.
+pub(crate) fn punct_squeeze(g: &Glyph) -> f64 {
+    if g.locked_advance || !(CLOSING_PUNCTUATION.contains(g.ch) || OPENING_PUNCTUATION.contains(g.ch)) {
+        return 0.0;
+    }
+    (g.adv - g.size * 0.5).clamp(0.0, g.size * 0.5)
 }
 
 /// Relative cost of using each tier of elastic material (word, letter, glyph).
@@ -518,6 +537,13 @@ fn kp_pass(
             sz[i + 1][t] = sz[i][t] + z[t];
         }
     }
+    // Squeezable punctuation up to each glyph.
+    let mut sqp = vec![0.0; glyphs.len() + 1];
+    if sp.punct_squeeze {
+        for (i, g) in glyphs.iter().enumerate() {
+            sqp[i + 1] = sqp[i] + punct_squeeze(g);
+        }
+    }
     let first_hang = items.iter().find(|i| i.kind == Kind::Box).map_or(0.0, |b| b.hang);
     let mut arena: Vec<Node> =
         vec![Node { pos: 0, line: 0, fitness: 1, tw: first_hang, ty: [0.0; 3], tz: [0.0; 3], demerits: 0.0, prev: None, hyphens: 0, flagged: false }];
@@ -553,6 +579,18 @@ fn kp_pass(
             // A line that overruns its measure by a rounding error fits exactly.
             let d = target - l;
             let d = if d < 0.0 && d > -FIT_EPS { 0.0 } else { d };
+            // Japanese punctuation closes up first, at no cost: within the range of the spacing table
+            // the composer doesn't count it as a bad line (the mark at the line end is half width
+            // already, see `cjk_hang`).
+            let mut d = d;
+            if sp.punct_squeeze && d < 0.0 {
+                let (from, to) = (ig[n.pos].min(glyphs.len()), ig[b].min(glyphs.len()));
+                let mut free = sqp.get(to).copied().unwrap_or(0.0) - sqp.get(from).copied().unwrap_or(0.0);
+                if let Some(last) = glyphs.get(to.wrapping_sub(1)).filter(|g| CLOSING_PUNCTUATION.contains(g.ch)) {
+                    free -= punct_squeeze(last);
+                }
+                d += free.clamp(0.0, -d);
+            }
             let (mut r, feasible) = tiered_ratio(d, y, z);
             if sp.justify
                 && d > 0.0

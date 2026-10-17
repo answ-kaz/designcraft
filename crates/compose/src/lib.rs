@@ -1610,9 +1610,6 @@ pub fn column_rule_rects(columns: &[Rect], lines: &[Line], opts: &TextFrameOptio
 /// when they end a line (行末約物半角).
 const LINE_END_HALF_EM: &str = "、。，．」』）】〕〉》｝］〙〗";
 
-/// Opening brackets: a closing mark before one is set at half width.
-const OPENING_PUNCTUATION: &str = "（「『【〔〈《｛［〘〖";
-
 /// Does the paragraph's mojikumi set line-end punctuation at half width (IDML `LineEndAllOneHalfEm`)?
 /// Only this one rule of the spacing table is applied; the rest of the table is preserved, not applied.
 fn line_end_half_em(pp: &ParaProps) -> bool {
@@ -1640,6 +1637,7 @@ fn spacing_for(pp: &ParaProps, base_size: f64) -> Spacing {
         hyph_zone: if pp.align.is_justified() || pp.composer != Composer::SingleLine { 0.0 } else { pp.hyph_zone },
         optical: pp.optical_margin,
         korean_char_breaks: pp.korean_char_breaks,
+        punct_squeeze: line_end_half_em(pp) && pp.align.is_justified(),
     }
 }
 
@@ -1657,7 +1655,7 @@ fn apply_desired_spacing(glyphs: &mut [Glyph], pp: &ParaProps) {
             g.cjk_hang = g.cjk_hang.max(tracking + (g.adv - tracking) * 0.5);
             // A closing punctuation mark followed by another one or by an opening bracket is set at
             // half width ("、。", "」「"), as the mojikumi tables of Japanese typesetting have it.
-            if g.adv > g.size * 0.9 && right.first().is_some_and(|n| LINE_END_HALF_EM.contains(n.ch) || OPENING_PUNCTUATION.contains(n.ch)) {
+            if g.adv > g.size * 0.9 && right.first().is_some_and(|n| LINE_END_HALF_EM.contains(n.ch) || breaker::OPENING_PUNCTUATION.contains(n.ch)) {
                 g.adv *= 0.5;
                 g.cjk_hang = 0.0;
             }
@@ -2613,7 +2611,7 @@ fn layout_line(
     };
     let justify_this = align.is_justified() && (!last || align == Align::FullyJustified || forced_mid) && seg_justifies;
     // A justified paragraph's last line may have been composed with shrunk spaces: shrink it too.
-    let squeeze_last = align.is_justified() && !justify_this && seg_justifies && extra < 0.0 && !spaces.is_empty();
+    let squeeze_last = align.is_justified() && !justify_this && seg_justifies && extra < 0.0 && (!spaces.is_empty() || sp.punct_squeeze);
     // Extra advance per glyph (word spaces and letter gaps) and horizontal scale per glyph.
     let mut add = vec![0.0; line.len()];
     let mut scale = vec![1.0; line.len()];
@@ -2637,6 +2635,11 @@ fn layout_line(
         let (seg_line, seg_add, seg_scale) =
             (line.get(seg..).unwrap_or(&[]), add.get_mut(seg..).unwrap_or(&mut []), scale.get_mut(seg..).unwrap_or(&mut []));
         distribute(seg_line, &rebased, extra, sp, seg_add, seg_scale);
+    } else if squeeze_last && spaces.is_empty() {
+        // A last line composed with squeezed punctuation closes the punctuation up again.
+        let (seg_line, seg_add, seg_scale) =
+            (line.get(seg..).unwrap_or(&[]), add.get_mut(seg..).unwrap_or(&mut []), scale.get_mut(seg..).unwrap_or(&mut []));
+        distribute(seg_line, &[], extra, sp, seg_add, seg_scale);
     } else if justify_this && spaces.is_empty() && line.len() > seg + 1 && !last && extra < 0.0 {
         // An overfull single word shrinks only as far as the minimum letter spacing and glyph scaling allow.
         let (seg_line, seg_add, seg_scale) =
@@ -2916,8 +2919,24 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
             }
         })
         .collect();
+    // Japanese punctuation squeezes first when a line is overfull (an opening bracket closes up the
+    // space before it, so it is the glyph in front that gets narrower).
+    let squeeze: Vec<f64> = line
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            if !stretch && sp.punct_squeeze && (i + 1 < line.len() || !breaker::CLOSING_PUNCTUATION.contains(g.ch)) {
+                breaker::punct_squeeze(g)
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let ys = squeeze.iter().sum::<f64>();
     let (yw, yl, yg) = (word.iter().sum::<f64>(), letter.iter().sum::<f64>(), glyph.iter().sum::<f64>());
     let mut rem = extra.abs();
+    let ts = rem.min(ys);
+    rem -= ts;
     let tw = rem.min(yw);
     rem -= tw;
     let tl = rem.min(yl);
@@ -2927,6 +2946,15 @@ fn distribute(line: &[Glyph], spaces: &[usize], extra: f64, sp: &Spacing, add: &
     let sign = if stretch { 1.0 } else { -1.0 };
     // Stretch left over beyond every limit is shared equally by the word spaces; shrink never goes
     // past the minimums (that would overlap glyphs), so an overfull line stays overfull.
+    if ys > 1e-9 && ts > 0.0 {
+        for (i, c) in squeeze.iter().enumerate() {
+            if *c <= 0.0 {
+                continue;
+            }
+            let at = if breaker::OPENING_PUNCTUATION.contains(line[i].ch) { i.saturating_sub(1) } else { i };
+            add[at] -= ts * c / ys;
+        }
+    }
     let over = if stretch && !spaces.is_empty() { rem / spaces.len() as f64 } else { 0.0 };
     for (k, &i) in spaces.iter().enumerate() {
         let share = if yw > 1e-9 { tw * word[k] / yw } else { 0.0 };

@@ -3132,6 +3132,24 @@ fn justified_cjk_lines_with_nothing_to_stretch_are_balanced_not_left_hopeless() 
 }
 
 #[test]
+fn justified_japanese_punctuation_squeezes_to_fit_a_line() {
+    // "ああああ。ああ" is 7 glyphs wide; a measure a little shorter holds it only when the full stop closes up.
+    let text = "ああああ。ああ";
+    let ragged = ParaAttrs { align: Some(Align::Left), hyphenate: Some(false), ..Default::default() };
+    let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, 600.0, 100.0), ragged);
+    let natural: f64 = compose_story(&d, sid, &ComposeOptions::default()).frames[0].lines[0].glyphs.iter().map(|g| g.adv).sum();
+    let measure = natural * 6.9 / 7.0;
+    let compose_with = |mojikumi: Option<String>| {
+        let para = ParaAttrs { align: Some(Align::LeftJustified), hyphenate: Some(false), mojikumi, ..Default::default() };
+        let (d, sid, _) = doc_with(text, Rect::new(0.0, 0.0, measure, 100.0), para);
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        (all_lines(&cs).len(), cs.is_overset())
+    };
+    assert_eq!(compose_with(Some("LineEndAllOneHalfEmEnum".into())), (1, false), "the full stop closes up, the line fits");
+    assert_eq!(compose_with(None).0, 2, "without the mojikumi nothing is squeezed");
+}
+
+#[test]
 fn cjk_fullwidth_space_obeys_the_paragraph_spacing_switch() {
     let text = "A　B";
     let (mut d, sid, _) = doc_with(
