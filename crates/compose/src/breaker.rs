@@ -247,8 +247,8 @@ const INF: f64 = 10000.0;
 
 /// A line whose natural width exceeds its measure by no more than this (points) still fits: frame
 /// widths and glyph advances are rounded, so a line that exactly fills the measure can come out a
-/// hair too wide.
-const FIT_EPS: f64 = 0.05;
+/// hair too wide, and InDesign lets a trailing tab run to a stop up to about 0.07 pt past the edge.
+const FIT_EPS: f64 = 0.1;
 
 /// Penalty for an emergency break inside a word wider than the measure: high, so a paragraph
 /// takes no more of them than it must, but below [`INF`] so they are legal.
@@ -688,6 +688,10 @@ fn kp_pass(
                 let free = cap.min(-d);
                 d += free;
                 z[0] -= free;
+                // The line still overruns by a rounding error: it fits exactly.
+                if d < 0.0 && d > -FIT_EPS {
+                    d = 0.0;
+                }
             }
             let (mut r, feasible) = tiered_ratio(d, y, z, so[b] - n.to);
             if sp.justify

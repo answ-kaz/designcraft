@@ -7320,4 +7320,18 @@ fn spacing_the_mojikumi_table_closes_up_costs_nothing_when_a_line_fits_by_squeez
     d.item_mut(fid).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, measure, 100.0));
     let cs = compose_story(&d, sid, &ComposeOptions::default());
     assert_eq!(all_lines(&cs).len(), 1, "{:?}", all_lines(&cs).iter().map(|l| l.end_x).collect::<Vec<_>>());
+    // Squeezed to the last drop and a hair beyond (a rounding error): still one line.
+    d.item_mut(fid).unwrap().path = designcraft_geom::shapes::rectangle(Rect::new(0.0, 0.0, natural - gaps - 0.01, 100.0));
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(all_lines(&cs).len(), 1, "a line that overruns by a rounding error once squeezed fits");
+}
+
+#[test]
+fn a_trailing_tab_stop_a_hair_beyond_the_frame_edge_still_fits() {
+    // InDesign lets a tab run to a stop that lies 0.07 pt beyond the frame (a label frame made to
+    // end at its tab stop, its width stored with rounding): the tab doesn't wrap the line.
+    let (d, sid, _) = doc_with("AB	", Rect::new(0.0, 0.0, 36.0 - 0.07, 100.0), ParaAttrs::default());
+    let cs = compose_story(&d, sid, &ComposeOptions::default());
+    assert_eq!(all_lines(&cs).len(), 1);
+    assert!(!cs.is_overset());
 }
