@@ -221,8 +221,11 @@ pub(crate) fn parse_eps_text(b: &[u8]) -> Option<EpsText> {
     (size.is_finite() && size > 0.0 && x.is_finite() && y.is_finite() && !text.is_empty()).then_some(EpsText { font, size, x, y, text })
 }
 
-/// Sniff an image's MIME type and pixel size from its header (PNG, JPEG, GIF, WebP, TIFF, BMP).
+/// Sniff an image's MIME type and pixel size (PNG, JPEG, GIF, WebP, TIFF, BMP, PDF, EPS).
 pub(crate) fn sniff_image(b: &[u8]) -> (Option<&'static str>, Option<(u32, u32)>) {
+    if designcraft_images::is_eps(b) {
+        return (Some("application/postscript"), designcraft_images::eps_pixel_size(b));
+    }
     let be32 = |i: usize| b.get(i..i + 4).map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]));
     if b.starts_with(b"\x89PNG\r\n\x1a\n") {
         return (Some("image/png"), be32(16).zip(be32(20)));
