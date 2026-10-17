@@ -597,7 +597,9 @@ impl Renderer {
             if op {
                 ctx.push_layer(None, Some(BlendMode::new(Mix::Multiply, Compose::SrcOver)), None, None, None);
             }
-            if set_fill_paint(ctx, doc, &it.fill, bp.bounding_box()) && it.path.is_closed() {
+            // An open path is filled as if it were closed, as InDesign does (IDML polygons mix open
+            // and closed contours, e.g. the circles cut out of a logo).
+            if set_fill_paint(ctx, doc, &it.fill, bp.bounding_box()) {
                 ctx.fill_path(bp);
             }
             ctx.reset_paint_transform();
